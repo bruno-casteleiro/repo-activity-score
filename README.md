@@ -1,6 +1,6 @@
-# Repository Activity Scoring Algorithm
+# repo-activity-score
 
-The `solution.go` algorithm calculates a repository activity score (0-100) for each repository based on a dataset of GitHub commit data. The score measures the overall level of development activity by combining three independent dimensions of work: frequency, magnitude, and consistency.
+The `solution.go` program calculates a repository activity score (0-100) based on a provided dataset of GitHub commit data. The score measures the overall level of development activity by combining three independent dimensions of work: frequency, magnitude, and consistency.
 
 ## Algorithm Design
 
