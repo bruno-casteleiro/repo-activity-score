@@ -128,9 +128,9 @@ Shows top 20 repositories instead of 10.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-f` | (required) | Path to CSV file |
-| `-w-commits` | 0.4 | Weight for commit frequency (0-1) |
-| `-w-changes` | 0.5 | Weight for line changes (0-1) |
-| `-w-consistency` | 0.1 | Weight for consistency (0-1) |
+| `-w-commits` | 0.33 | Weight for commit frequency (0-1) |
+| `-w-changes` | 0.33 | Weight for line changes (0-1) |
+| `-w-consistency` | 0.34 | Weight for consistency (0-1) |
 | `-t` | 10 | Number of top repos to display |
 
 **Note:** If weights don't sum to 1.0, they are automatically normalized.
