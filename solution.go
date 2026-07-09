@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+type Config struct {
+	filename string
+	weights  Weights
+	top      int
+}
+
+type Weights struct {
+	commits, changes, consistency float64
+}
+
 type Commit struct {
 	date      time.Time
 	additions int
@@ -114,42 +124,14 @@ func main() {
 }
 
 func run() error {
-	// Define CLI flags for parameterization
-	filename := flag.String("f", "", "Path to CSV file (required)")
-	wCommits := flag.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
-	wChanges := flag.Float64("w-changes", 0.33, "Weight for 'total line changes' metric (0-1)")
-	wConsistency := flag.Float64("w-consistency", 0.34, "Weight for 'commit consistency' metric (0-1)")
-	top := flag.Int("t", 10, "Show rank for top-x repos")
 
-	flag.Parse()
-
-	// Validate filename
-	if *filename == "" {
-		return errors.New("filename must be provided")
-	}
-
-	// Validate weights
-	if *wCommits < 0 || *wChanges < 0 || *wConsistency < 0 {
-		return errors.New("weights must be non-negative")
-	}
-
-	// Normalize weights to sum to 1.0
-	totalWeight := *wCommits + *wChanges + *wConsistency
-	if totalWeight == 0 {
-		return errors.New("sum of weights must be greater than 0")
-	}
-
-	wCommitsNorm := *wCommits / totalWeight
-	wChangesNorm := *wChanges / totalWeight
-	wConsistencyNorm := *wConsistency / totalWeight
-
-	// Validate top-x
-	if *top <= 0 {
-		return errors.New("top must be positive")
+	cfg, err := parseConfig()
+	if err != nil {
+		return err
 	}
 
 	// Open and read CSV file
-	file, err := os.Open(*filename)
+	file, err := os.Open(cfg.filename)
 	if err != nil {
 		return err
 	}
@@ -215,7 +197,7 @@ func run() error {
 	// Calculate weighted activity score for each repo
 	var repoScores []RepoScore
 	for idx, repo := range repoNames {
-		score := (normalizedStats.commits[idx] * wCommitsNorm) + (normalizedStats.lineChanges[idx] * wChangesNorm) + (normalizedStats.consistency[idx] * wConsistencyNorm)
+		score := (normalizedStats.commits[idx] * cfg.weights.commits) + (normalizedStats.lineChanges[idx] * cfg.weights.changes) + (normalizedStats.consistency[idx] * cfg.weights.consistency)
 		repoScores = append(repoScores, RepoScore{repo, int(math.Round(score))})
 	}
 
@@ -230,7 +212,7 @@ func run() error {
 	})
 
 	// Display top-x rank
-	topx := min(*top, len(repoScores))
+	topx := min(cfg.top, len(repoScores))
 	fmt.Printf("Top-%d most active repos:\n", topx)
 	for pos := range topx {
 		repoScore := repoScores[pos]
@@ -238,6 +220,48 @@ func run() error {
 	}
 
 	return nil
+}
+
+func parseConfig() (Config, error) {
+	// Define CLI flags for parameterization
+	filename := flag.String("f", "", "Path to CSV file (required)")
+	wCommits := flag.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
+	wChanges := flag.Float64("w-changes", 0.33, "Weight for 'total line changes' metric (0-1)")
+	wConsistency := flag.Float64("w-consistency", 0.34, "Weight for 'commit consistency' metric (0-1)")
+	top := flag.Int("t", 10, "Show rank for top-x repos")
+
+	flag.Parse()
+
+	// Validate filename
+	if *filename == "" {
+		return Config{}, errors.New("filename must be provided")
+	}
+
+	// Validate weights
+	if *wCommits < 0 || *wChanges < 0 || *wConsistency < 0 {
+		return Config{}, errors.New("weights must be non-negative")
+	}
+
+	totalWeight := *wCommits + *wChanges + *wConsistency
+	if totalWeight == 0 {
+		return Config{}, errors.New("sum of weights must be greater than 0")
+	}
+
+	// Validate top-x
+	if *top <= 0 {
+		return Config{}, errors.New("top must be positive")
+	}
+
+	return Config{
+		*filename,
+		Weights{
+			// weights are normalized
+			*wCommits / totalWeight,
+			*wChanges / totalWeight,
+			*wConsistency / totalWeight,
+		},
+		*top,
+	}, nil
 }
 
 // Creates a new commit using string values from a CSV row.
