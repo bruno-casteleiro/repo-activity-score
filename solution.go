@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"math"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -62,7 +64,7 @@ func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
 		commitsPerDay[day]++
 	}
 
-	dailyCommitsCount := []int{}
+	var dailyCommitsCount []int
 	cur := startDate
 	end := endDate.AddDate(0, 0, 1)
 
@@ -108,7 +110,7 @@ func (s Stats) Normalize() Stats {
 // Formula: ((value - min) / (max - min)) * 100
 func normalizeScore(values []float64) []float64 {
 	if len(values) == 0 {
-		return []float64{}
+		return nil
 	}
 
 	minVal := values[0]
@@ -165,25 +167,31 @@ func std(values []int) float64 {
 }
 
 // Creates a new commit using string values from a CSV row.
-func makeCommit(timestamp, additions, removals string) *Commit {
-	intTimestamp, err1 := strconv.ParseInt(timestamp, 10, 64)
-	intAdditions, err2 := strconv.Atoi(additions)
-	intRemovals, err3 := strconv.Atoi(removals)
-
-	// skip bad rows
-	if err1 != nil || err2 != nil || err3 != nil {
-		return nil
+func newCommit(timestamp, additions, removals string) (*Commit, error) {
+	intTimestamp, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse timestamp %q: %w", timestamp, err)
 	}
 
-	return &Commit{time.Unix(intTimestamp, 0), intAdditions, intRemovals}
+	intAdditions, err := strconv.Atoi(additions)
+	if err != nil {
+		return nil, fmt.Errorf("parse additions %q: %w", additions, err)
+	}
+
+	intRemovals, err := strconv.Atoi(removals)
+	if err != nil {
+		return nil, fmt.Errorf("parse removals %q: %w", removals, err)
+	}
+
+	return &Commit{time.Unix(intTimestamp, 0), intAdditions, intRemovals}, nil
 }
 
 // Creates a new repo with an initial commit.
-func makeRepo(name string, commit *Commit) *Repo {
+func newRepo(name string, commit *Commit) *Repo {
 	return &Repo{name, []*Commit{commit}}
 }
 
-func main() {
+func run() error {
 	// Define CLI flags for parameterization
 	filename := flag.String("f", "", "Path to CSV file (required)")
 	wCommits := flag.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
@@ -195,59 +203,61 @@ func main() {
 
 	// Validate filename
 	if *filename == "" {
-		fmt.Println("Error: filename must be provided")
-		os.Exit(1)
+		return errors.New("filename must be provided")
 	}
 
 	// Validate weights
 	if *wCommits < 0 || *wChanges < 0 || *wConsistency < 0 {
-		fmt.Println("Error: weights must be non-negative")
-		os.Exit(1)
+		return errors.New("weights must be non-negative")
 	}
 
 	// Normalize weights to sum to 1.0
 	totalWeight := *wCommits + *wChanges + *wConsistency
 	if totalWeight == 0 {
-		fmt.Println("Error: total weight must be greater than 0")
-		os.Exit(1)
+		return errors.New("sum of weights must be greater than 0")
 	}
 
-	w1 := *wCommits / totalWeight
-	w2 := *wChanges / totalWeight
-	w3 := *wConsistency / totalWeight
+	wCommitsNorm := *wCommits / totalWeight
+	wChangesNorm := *wChanges / totalWeight
+	wConsistencyNorm := *wConsistency / totalWeight
 
 	// Validate top-x
 	if *top <= 0 {
-		fmt.Println("Error: top must be positive")
-		os.Exit(1)
+		return errors.New("top must be positive")
 	}
 
 	// Open and read CSV file
 	file, err := os.Open(*filename)
 	if err != nil {
-		fmt.Println("Error:", err)
-		os.Exit(1)
+		return err
 	}
 	defer file.Close()
 
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
 	if err != nil {
-		fmt.Println("Error:", err)
-		os.Exit(1)
+		return err
+	}
+
+	if len(records) == 0 {
+		return errors.New("CSV file provided is empty")
 	}
 
 	// Parse CSV and group commits by repo
 	// Expected CSV format:
 	// 		[0]=timestamp, [1]=user, [2]=repository, [3]=files_changed, [4]=additions, [5]=removals
 	repos := make(map[string]*Repo)
-	repoNames := []string{}
+	var repoNames []string
 	oldestCommitDate := time.Now()
 	latestCommitDate := time.Unix(0, 0)
 
 	for _, record := range records[1:] {
-		commit := makeCommit(record[0], record[4], record[5])
-		if commit == nil {
+		if len(record) < 6 {
+			continue
+		}
+
+		commit, err := newCommit(record[0], record[4], record[5])
+		if err != nil {
 			continue
 		}
 
@@ -255,7 +265,7 @@ func main() {
 		if ok {
 			r.commits = append(r.commits, commit)
 		} else {
-			repos[record[2]] = makeRepo(record[2], commit)
+			repos[record[2]] = newRepo(record[2], commit)
 			repoNames = append(repoNames, record[2])
 		}
 
@@ -270,8 +280,8 @@ func main() {
 
 	// Calculate raw metrics for each repo
 	stats := Stats{}
-	for _, repo := range repoNames {
-		repo := repos[repo]
+	for _, name := range repoNames {
+		repo := repos[name]
 		stats.commits = append(stats.commits, float64(repo.TotalCommits()))
 		stats.lineChanges = append(stats.lineChanges, float64(repo.TotalLineChanges()))
 		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommitDate, latestCommitDate))
@@ -281,15 +291,20 @@ func main() {
 	normalizedStats := stats.Normalize()
 
 	// Calculate weighted activity score for each repo
-	repoScores := []RepoScore{}
+	var repoScores []RepoScore
 	for idx, repo := range repoNames {
-		score := (normalizedStats.commits[idx] * w1) + (normalizedStats.lineChanges[idx] * w2) + (normalizedStats.consistency[idx] * w3)
+		score := (normalizedStats.commits[idx] * wCommitsNorm) + (normalizedStats.lineChanges[idx] * wChangesNorm) + (normalizedStats.consistency[idx] * wConsistencyNorm)
 		repoScores = append(repoScores, RepoScore{repo, int(math.Round(score))})
 	}
 
 	// Sort repos by score in descending order
-	sort.Slice(repoScores, func(i, j int) bool {
-		return repoScores[i].score > repoScores[j].score
+	slices.SortFunc(repoScores, func(a, b RepoScore) int {
+		scoreCmp := cmp.Compare(a.score, b.score)
+		if scoreCmp == 0 {
+			return cmp.Compare(a.name, b.name)
+		}
+
+		return -scoreCmp
 	})
 
 	// Display top-x rank
@@ -298,5 +313,14 @@ func main() {
 	for pos := range topx {
 		repoScore := repoScores[pos]
 		fmt.Printf("%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
 	}
 }
