@@ -19,25 +19,14 @@ type Commit struct {
 	removals  int
 }
 
-type Repo struct {
-	name    string
-	commits []*Commit
-}
-
-type Stats struct {
-	commits     []float64 // Total commits per repo
-	lineChanges []float64 // Total lines changed per repo
-	consistency []float64 // Commit distribution over time per repo
-}
-
-type RepoScore struct {
-	name  string
-	score int
-}
-
 // Returns the total number of lines changed in a commit.
 func (c Commit) LineChanges() int {
 	return c.additions + c.removals
+}
+
+type Repo struct {
+	name    string
+	commits []*Commit
 }
 
 // Returns the number of commits in a repo.
@@ -83,6 +72,12 @@ func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
 	return std(dailyCommitsCount) / mean
 }
 
+type Stats struct {
+	commits     []float64 // Total commits per repo
+	lineChanges []float64 // Total lines changed per repo
+	consistency []float64 // Commit distribution over time per repo
+}
+
 // Transforms raw metrics into normalized scores (0-100).
 func (s Stats) Normalize() Stats {
 	// Find max consistency value for inversion
@@ -106,89 +101,16 @@ func (s Stats) Normalize() Stats {
 	}
 }
 
-// Applies min-max normalization to scale values to 0-100.
-// Formula: ((value - min) / (max - min)) * 100
-func normalizeScore(values []float64) []float64 {
-	if len(values) == 0 {
-		return nil
-	}
-
-	minVal := values[0]
-	maxVal := values[0]
-	for _, v := range values {
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-
-	result := make([]float64, len(values))
-
-	// Retrieve middle score if all values are equal
-	if minVal == maxVal {
-		for i := range result {
-			result[i] = 50.0
-		}
-		return result
-	}
-
-	// Normalize to 0-100 range
-	for i, v := range values {
-		result[i] = ((v - minVal) / (maxVal - minVal)) * 100
-	}
-
-	return result
+type RepoScore struct {
+	name  string
+	score int
 }
 
-// Calculates the standard deviation of a set of integers.
-func std(values []int) float64 {
-	if len(values) == 0 {
-		return 0
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
 	}
-
-	// Calculate mean
-	sum := 0
-	for _, v := range values {
-		sum += v
-	}
-	mean := float64(sum) / float64(len(values))
-
-	// Calculate variance
-	variance := 0.0
-	for _, v := range values {
-		diff := float64(v) - mean
-		variance += diff * diff
-	}
-	variance /= float64(len(values))
-
-	return math.Sqrt(variance)
-}
-
-// Creates a new commit using string values from a CSV row.
-func newCommit(timestamp, additions, removals string) (*Commit, error) {
-	intTimestamp, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parse timestamp %q: %w", timestamp, err)
-	}
-
-	intAdditions, err := strconv.Atoi(additions)
-	if err != nil {
-		return nil, fmt.Errorf("parse additions %q: %w", additions, err)
-	}
-
-	intRemovals, err := strconv.Atoi(removals)
-	if err != nil {
-		return nil, fmt.Errorf("parse removals %q: %w", removals, err)
-	}
-
-	return &Commit{time.Unix(intTimestamp, 0), intAdditions, intRemovals}, nil
-}
-
-// Creates a new repo with an initial commit.
-func newRepo(name string, commit *Commit) *Repo {
-	return &Repo{name, []*Commit{commit}}
 }
 
 func run() error {
@@ -318,9 +240,87 @@ func run() error {
 	return nil
 }
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
+// Creates a new commit using string values from a CSV row.
+func newCommit(timestamp, additions, removals string) (*Commit, error) {
+	intTimestamp, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse timestamp %q: %w", timestamp, err)
 	}
+
+	intAdditions, err := strconv.Atoi(additions)
+	if err != nil {
+		return nil, fmt.Errorf("parse additions %q: %w", additions, err)
+	}
+
+	intRemovals, err := strconv.Atoi(removals)
+	if err != nil {
+		return nil, fmt.Errorf("parse removals %q: %w", removals, err)
+	}
+
+	return &Commit{time.Unix(intTimestamp, 0), intAdditions, intRemovals}, nil
+}
+
+// Creates a new repo with an initial commit.
+func newRepo(name string, commit *Commit) *Repo {
+	return &Repo{name, []*Commit{commit}}
+}
+
+// Calculates the standard deviation of a set of integers.
+func std(values []int) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	// Calculate mean
+	sum := 0
+	for _, v := range values {
+		sum += v
+	}
+	mean := float64(sum) / float64(len(values))
+
+	// Calculate variance
+	variance := 0.0
+	for _, v := range values {
+		diff := float64(v) - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(values))
+
+	return math.Sqrt(variance)
+}
+
+// Applies min-max normalization to scale values to 0-100.
+// Formula: ((value - min) / (max - min)) * 100
+func normalizeScore(values []float64) []float64 {
+	if len(values) == 0 {
+		return nil
+	}
+
+	minVal := values[0]
+	maxVal := values[0]
+	for _, v := range values {
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+
+	result := make([]float64, len(values))
+
+	// Retrieve middle score if all values are equal
+	if minVal == maxVal {
+		for i := range result {
+			result[i] = 50.0
+		}
+		return result
+	}
+
+	// Normalize to 0-100 range
+	for i, v := range values {
+		result[i] = ((v - minVal) / (maxVal - minVal)) * 100
+	}
+
+	return result
 }
