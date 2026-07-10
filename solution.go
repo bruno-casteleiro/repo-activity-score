@@ -125,7 +125,6 @@ func main() {
 }
 
 func run() error {
-
 	cfg, err := parseConfig()
 	if err != nil {
 		return err
@@ -180,14 +179,14 @@ func parseConfig() (Config, error) {
 	}
 
 	return Config{
-		*filename,
-		Weights{
+		filename: *filename,
+		weights: Weights{
 			// weights are normalized
-			*wCommits / totalWeight,
-			*wChanges / totalWeight,
-			*wConsistency / totalWeight,
+			commits:     *wCommits / totalWeight,
+			changes:     *wChanges / totalWeight,
+			consistency: *wConsistency / totalWeight,
 		},
-		*top,
+		top: *top,
 	}, nil
 }
 
@@ -260,7 +259,11 @@ func newCommit(timestamp, additions, removals string) (*Commit, error) {
 		return nil, fmt.Errorf("parse removals %q: %w", removals, err)
 	}
 
-	return &Commit{time.Unix(intTimestamp, 0), intAdditions, intRemovals}, nil
+	return &Commit{
+		date:      time.Unix(intTimestamp, 0),
+		additions: intAdditions,
+		removals:  intRemovals,
+	}, nil
 }
 
 // Creates a new repo with an initial commit.
