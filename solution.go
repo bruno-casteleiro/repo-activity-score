@@ -144,13 +144,7 @@ func run() error {
 
 	scores := scoreRepos(repos, oldestCommit, latestCommit, cfg.weights)
 
-	// Display top-x rank
-	topx := min(cfg.top, len(scores))
-	fmt.Printf("Top-%d most active repos:\n", topx)
-	for pos := range topx {
-		repoScore := scores[pos]
-		fmt.Printf("%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
-	}
+	printTop(os.Stdout, scores, cfg.top)
 
 	return nil
 }
@@ -364,4 +358,13 @@ func normalizeScore(values []float64) []float64 {
 	}
 
 	return result
+}
+
+func printTop(out io.Writer, scores []RepoScore, top int) {
+	topx := min(top, len(scores))
+	fmt.Fprintf(out, "Top-%d most active repos:\n", topx)
+	for pos := range topx {
+		repoScore := scores[pos]
+		fmt.Fprintf(out, "%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
+	}
 }
