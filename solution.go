@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"slices"
@@ -130,65 +131,23 @@ func run() error {
 		return err
 	}
 
-	// Open and read CSV file
 	file, err := os.Open(cfg.filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
+	repos, oldestCommit, latestCommit, err := parseRepos(file)
 	if err != nil {
 		return err
 	}
 
-	if len(records) == 0 {
-		return errors.New("CSV file provided is empty")
-	}
-
-	// Parse CSV and group commits by repo
-	// Expected CSV format:
-	// 		[0]=timestamp, [1]=user, [2]=repository, [3]=files_changed, [4]=additions, [5]=removals
-	repos := make(map[string]*Repo)
-	var repoNames []string
-	oldestCommitDate := time.Now()
-	latestCommitDate := time.Unix(0, 0)
-
-	for _, record := range records[1:] {
-		if len(record) < 6 {
-			continue
-		}
-
-		commit, err := newCommit(record[0], record[4], record[5])
-		if err != nil {
-			continue
-		}
-
-		r, ok := repos[record[2]]
-		if ok {
-			r.commits = append(r.commits, commit)
-		} else {
-			repos[record[2]] = newRepo(record[2], commit)
-			repoNames = append(repoNames, record[2])
-		}
-
-		// Track oldest/latest commit date for later use
-		if commit.date.Before(oldestCommitDate) {
-			oldestCommitDate = commit.date
-		}
-		if commit.date.After(latestCommitDate) {
-			latestCommitDate = commit.date
-		}
-	}
-
 	// Calculate raw metrics for each repo
 	stats := Stats{}
-	for _, name := range repoNames {
-		repo := repos[name]
+	for _, repo := range repos {
 		stats.commits = append(stats.commits, float64(repo.TotalCommits()))
 		stats.lineChanges = append(stats.lineChanges, float64(repo.TotalLineChanges()))
-		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommitDate, latestCommitDate))
+		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommit, latestCommit))
 	}
 
 	// Normalize metrics to 0-100 scale
@@ -196,9 +155,9 @@ func run() error {
 
 	// Calculate weighted activity score for each repo
 	var repoScores []RepoScore
-	for idx, repo := range repoNames {
+	for idx, repo := range repos {
 		score := (normalizedStats.commits[idx] * cfg.weights.commits) + (normalizedStats.lineChanges[idx] * cfg.weights.changes) + (normalizedStats.consistency[idx] * cfg.weights.consistency)
-		repoScores = append(repoScores, RepoScore{repo, int(math.Round(score))})
+		repoScores = append(repoScores, RepoScore{repo.name, int(math.Round(score))})
 	}
 
 	// Sort repos by score in descending order
@@ -262,6 +221,58 @@ func parseConfig() (Config, error) {
 		},
 		*top,
 	}, nil
+}
+
+func parseRepos(r io.Reader) (repos []*Repo, oldestCommit, latestCommit time.Time, err error) {
+	reader := csv.NewReader(r)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return
+	}
+
+	if len(records) == 0 {
+		err = errors.New("CSV file provided is empty")
+		return
+	}
+
+	// Parse CSV and group commits by repo
+	// Expected CSV format:
+	// 		[0]=timestamp, [1]=user, [2]=repository, [3]=files_changed, [4]=additions, [5]=removals
+	seen := make(map[string]*Repo)
+	first := true
+	for _, record := range records[1:] {
+		if len(record) < 6 {
+			continue
+		}
+
+		commit, err := newCommit(record[0], record[4], record[5])
+		if err != nil {
+			continue
+		}
+
+		name := record[2]
+
+		if repo, ok := seen[name]; ok {
+			repo.commits = append(repo.commits, commit)
+		} else {
+			repo = newRepo(name, commit)
+			seen[name] = repo
+			repos = append(repos, repo)
+		}
+
+		// Seed the date range on the first valid commit, then widen it.
+		switch {
+		case first:
+			oldestCommit, latestCommit = commit.date, commit.date
+			first = false
+		case commit.date.Before(oldestCommit):
+			oldestCommit = commit.date
+		case commit.date.After(latestCommit):
+			latestCommit = commit.date
+		}
+	}
+
+	return
 }
 
 // Creates a new commit using string values from a CSV row.
