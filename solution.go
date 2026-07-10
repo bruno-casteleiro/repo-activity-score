@@ -142,39 +142,13 @@ func run() error {
 		return err
 	}
 
-	// Calculate raw metrics for each repo
-	stats := Stats{}
-	for _, repo := range repos {
-		stats.commits = append(stats.commits, float64(repo.TotalCommits()))
-		stats.lineChanges = append(stats.lineChanges, float64(repo.TotalLineChanges()))
-		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommit, latestCommit))
-	}
-
-	// Normalize metrics to 0-100 scale
-	normalizedStats := stats.Normalize()
-
-	// Calculate weighted activity score for each repo
-	var repoScores []RepoScore
-	for idx, repo := range repos {
-		score := (normalizedStats.commits[idx] * cfg.weights.commits) + (normalizedStats.lineChanges[idx] * cfg.weights.changes) + (normalizedStats.consistency[idx] * cfg.weights.consistency)
-		repoScores = append(repoScores, RepoScore{repo.name, int(math.Round(score))})
-	}
-
-	// Sort repos by score in descending order
-	slices.SortFunc(repoScores, func(a, b RepoScore) int {
-		scoreCmp := cmp.Compare(a.score, b.score)
-		if scoreCmp == 0 {
-			return cmp.Compare(a.name, b.name)
-		}
-
-		return -scoreCmp
-	})
+	scores := scoreRepos(repos, oldestCommit, latestCommit, cfg.weights)
 
 	// Display top-x rank
-	topx := min(cfg.top, len(repoScores))
+	topx := min(cfg.top, len(scores))
 	fmt.Printf("Top-%d most active repos:\n", topx)
 	for pos := range topx {
-		repoScore := repoScores[pos]
+		repoScore := scores[pos]
 		fmt.Printf("%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
 	}
 
@@ -298,6 +272,38 @@ func newCommit(timestamp, additions, removals string) (*Commit, error) {
 // Creates a new repo with an initial commit.
 func newRepo(name string, commit *Commit) *Repo {
 	return &Repo{name, []*Commit{commit}}
+}
+
+func scoreRepos(repos []*Repo, oldestCommit, latestCommit time.Time, weights Weights) []RepoScore {
+	// Calculate raw metrics for each repo
+	stats := Stats{}
+	for _, repo := range repos {
+		stats.commits = append(stats.commits, float64(repo.TotalCommits()))
+		stats.lineChanges = append(stats.lineChanges, float64(repo.TotalLineChanges()))
+		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommit, latestCommit))
+	}
+
+	// Normalize metrics to 0-100 scale
+	normalizedStats := stats.Normalize()
+
+	// Calculate weighted activity score for each repo
+	var repoScores []RepoScore
+	for idx, repo := range repos {
+		score := (normalizedStats.commits[idx] * weights.commits) + (normalizedStats.lineChanges[idx] * weights.changes) + (normalizedStats.consistency[idx] * weights.consistency)
+		repoScores = append(repoScores, RepoScore{repo.name, int(math.Round(score))})
+	}
+
+	// Sort repos by score in descending order
+	slices.SortFunc(repoScores, func(a, b RepoScore) int {
+		scoreCmp := cmp.Compare(a.score, b.score)
+		if scoreCmp == 0 {
+			return cmp.Compare(a.name, b.name)
+		}
+
+		return -scoreCmp
+	})
+
+	return repoScores
 }
 
 // Calculates the standard deviation of a set of integers.
