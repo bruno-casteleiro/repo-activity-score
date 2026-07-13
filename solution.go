@@ -121,6 +121,19 @@ type RepoScore struct {
 	score int
 }
 
+type ErrWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (ew *ErrWriter) printf(format string, a ...any) {
+	if ew.err != nil {
+		return
+	}
+
+	_, ew.err = fmt.Fprintf(ew.w, format, a...)
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -371,11 +384,15 @@ func normalizeScore(values []float64) []float64 {
 	return result
 }
 
-func printTop(out io.Writer, scores []RepoScore, top int) {
+func printTop(out io.Writer, scores []RepoScore, top int) error {
+	ew := &ErrWriter{w: out}
+
 	topx := min(top, len(scores))
-	fmt.Fprintf(out, "Top-%d most active repos:\n", topx)
+	ew.printf("Top-%d most active repos:\n", topx)
 	for pos := range topx {
 		repoScore := scores[pos]
-		fmt.Fprintf(out, "%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
+		ew.printf("%d: %s (%d)\n", pos+1, repoScore.name, repoScore.score)
 	}
+
+	return ew.err
 }
