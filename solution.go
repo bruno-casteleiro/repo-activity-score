@@ -122,14 +122,14 @@ type RepoScore struct {
 }
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := parseConfig()
+func run(args []string, out io.Writer) error {
+	cfg, err := parseConfig(args)
 	if err != nil {
 		return err
 	}
@@ -147,20 +147,24 @@ func run() error {
 
 	scores := scoreRepos(repos, oldestCommit, latestCommit, cfg.weights)
 
-	printTop(os.Stdout, scores, cfg.top)
+	printTop(out, scores, cfg.top)
 
 	return nil
 }
 
-func parseConfig() (Config, error) {
+func parseConfig(args []string) (Config, error) {
 	// Define CLI flags for parameterization
-	filename := flag.String("f", "", "Path to CSV file (required)")
-	wCommits := flag.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
-	wChanges := flag.Float64("w-changes", 0.33, "Weight for 'total line changes' metric (0-1)")
-	wConsistency := flag.Float64("w-consistency", 0.34, "Weight for 'commit consistency' metric (0-1)")
-	top := flag.Int("t", 10, "Show rank for top-x repos")
+	fs := flag.NewFlagSet("repo-activity-score", flag.ContinueOnError)
 
-	flag.Parse()
+	filename := fs.String("f", "", "Path to CSV file (required)")
+	wCommits := fs.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
+	wChanges := fs.Float64("w-changes", 0.33, "Weight for 'total line changes' metric (0-1)")
+	wConsistency := fs.Float64("w-consistency", 0.34, "Weight for 'commit consistency' metric (0-1)")
+	top := fs.Int("t", 10, "Show rank for top-x repos")
+
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
 
 	// Validate filename
 	if *filename == "" {
