@@ -14,42 +14,42 @@ import (
 	"time"
 )
 
-type Config struct {
+type config struct {
 	filename string
-	weights  Weights
+	weights  weights
 	top      int
 }
 
-type Weights struct {
+type weights struct {
 	commits, changes, consistency float64
 }
 
-type Commit struct {
+type commit struct {
 	date      time.Time
 	additions int
 	removals  int
 }
 
 // Returns the total number of lines changed in a commit.
-func (c Commit) LineChanges() int {
+func (c commit) lineChanges() int {
 	return c.additions + c.removals
 }
 
-type Repo struct {
+type repo struct {
 	name    string
-	commits []*Commit
+	commits []*commit
 }
 
 // Returns the number of commits in a repo.
-func (r Repo) TotalCommits() int {
+func (r repo) totalCommits() int {
 	return len(r.commits)
 }
 
 // Returns the sum of all line changes across all commits in a repo.
-func (r Repo) TotalLineChanges() int {
+func (r repo) totalLineChanges() int {
 	result := 0
 	for _, commit := range r.commits {
-		result += commit.LineChanges()
+		result += commit.lineChanges()
 	}
 	return result
 }
@@ -57,7 +57,7 @@ func (r Repo) TotalLineChanges() int {
 // Returns a measure of how evenly commits are distributed over time.
 // Uses Coefficient of Variation to measure relative variability.
 // Lower CV = more consistent activity, Higher CV = more sporadic activity.
-func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
+func (r repo) consistency(startDate time.Time, endDate time.Time) float64 {
 	if startDate.IsZero() || endDate.IsZero() {
 		return 0
 	}
@@ -79,7 +79,7 @@ func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
 	}
 
 	// Calculate coefficient of variation: std dev / mean
-	mean := float64(r.TotalCommits()) / float64(len(dailyCommitsCount))
+	mean := float64(r.totalCommits()) / float64(len(dailyCommitsCount))
 	if mean == 0 {
 		return 0
 	}
@@ -87,14 +87,14 @@ func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
 	return std(dailyCommitsCount) / mean
 }
 
-type Stats struct {
+type stats struct {
 	commits     []float64 // Total commits per repo
 	lineChanges []float64 // Total lines changed per repo
 	consistency []float64 // Commit distribution over time per repo
 }
 
 // Transforms raw metrics into normalized scores (0-100).
-func (s Stats) Normalize() Stats {
+func (s stats) normalize() stats {
 	// Find max consistency value for inversion
 	maxConsistency := 0.0
 	for _, v := range s.consistency {
@@ -109,24 +109,24 @@ func (s Stats) Normalize() Stats {
 		invertedStdDailyCommits[idx] = maxConsistency - v
 	}
 
-	return Stats{
+	return stats{
 		commits:     normalizeScore(s.commits),
 		lineChanges: normalizeScore(s.lineChanges),
 		consistency: normalizeScore(invertedStdDailyCommits),
 	}
 }
 
-type RepoScore struct {
+type repoScore struct {
 	name  string
 	score int
 }
 
-type ErrWriter struct {
+type errWriter struct {
 	w   io.Writer
 	err error
 }
 
-func (ew *ErrWriter) printf(format string, a ...any) {
+func (ew *errWriter) printf(format string, a ...any) {
 	if ew.err != nil {
 		return
 	}
@@ -165,7 +165,7 @@ func run(args []string, out io.Writer) error {
 	return nil
 }
 
-func parseConfig(args []string) (Config, error) {
+func parseConfig(args []string) (config, error) {
 	// Define CLI flags for parameterization
 	fs := flag.NewFlagSet("repo-activity-score", flag.ContinueOnError)
 
@@ -176,32 +176,32 @@ func parseConfig(args []string) (Config, error) {
 	top := fs.Int("t", 10, "Show rank for top-x repos")
 
 	if err := fs.Parse(args); err != nil {
-		return Config{}, err
+		return config{}, err
 	}
 
 	// Validate filename
 	if *filename == "" {
-		return Config{}, errors.New("filename must be provided")
+		return config{}, errors.New("filename must be provided")
 	}
 
 	// Validate weights
 	if *wCommits < 0 || *wChanges < 0 || *wConsistency < 0 {
-		return Config{}, errors.New("weights must be non-negative")
+		return config{}, errors.New("weights must be non-negative")
 	}
 
 	totalWeight := *wCommits + *wChanges + *wConsistency
 	if totalWeight == 0 {
-		return Config{}, errors.New("sum of weights must be greater than 0")
+		return config{}, errors.New("sum of weights must be greater than 0")
 	}
 
 	// Validate top-x
 	if *top <= 0 {
-		return Config{}, errors.New("top must be positive")
+		return config{}, errors.New("top must be positive")
 	}
 
-	return Config{
+	return config{
 		filename: *filename,
-		weights: Weights{
+		weights: weights{
 			// weights are normalized
 			commits:     *wCommits / totalWeight,
 			changes:     *wChanges / totalWeight,
@@ -211,7 +211,7 @@ func parseConfig(args []string) (Config, error) {
 	}, nil
 }
 
-func parseRepos(r io.Reader) (repos []*Repo, oldestCommit, latestCommit time.Time, err error) {
+func parseRepos(r io.Reader) (repos []*repo, oldestCommit, latestCommit time.Time, err error) {
 	reader := csv.NewReader(r)
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -226,7 +226,7 @@ func parseRepos(r io.Reader) (repos []*Repo, oldestCommit, latestCommit time.Tim
 	// Parse CSV and group commits by repo
 	// Expected CSV format:
 	// 		[0]=timestamp, [1]=user, [2]=repository, [3]=files_changed, [4]=additions, [5]=removals
-	seen := make(map[string]*Repo)
+	seen := make(map[string]*repo)
 	first := true
 	for _, record := range records[1:] {
 		if len(record) < 6 {
@@ -264,7 +264,7 @@ func parseRepos(r io.Reader) (repos []*Repo, oldestCommit, latestCommit time.Tim
 }
 
 // Creates a new commit using string values from a CSV row.
-func newCommit(timestamp, additions, removals string) (*Commit, error) {
+func newCommit(timestamp, additions, removals string) (*commit, error) {
 	intTimestamp, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("parse timestamp %q: %w", timestamp, err)
@@ -280,7 +280,7 @@ func newCommit(timestamp, additions, removals string) (*Commit, error) {
 		return nil, fmt.Errorf("parse removals %q: %w", removals, err)
 	}
 
-	return &Commit{
+	return &commit{
 		date:      time.Unix(intTimestamp, 0),
 		additions: intAdditions,
 		removals:  intRemovals,
@@ -288,31 +288,31 @@ func newCommit(timestamp, additions, removals string) (*Commit, error) {
 }
 
 // Creates a new repo with an initial commit.
-func newRepo(name string, commit *Commit) *Repo {
-	return &Repo{name, []*Commit{commit}}
+func newRepo(name string, c *commit) *repo {
+	return &repo{name, []*commit{c}}
 }
 
-func scoreRepos(repos []*Repo, oldestCommit, latestCommit time.Time, weights Weights) []RepoScore {
+func scoreRepos(repos []*repo, oldestCommit, latestCommit time.Time, weights weights) []repoScore {
 	// Calculate raw metrics for each repo
-	stats := Stats{}
+	stats := stats{}
 	for _, repo := range repos {
-		stats.commits = append(stats.commits, float64(repo.TotalCommits()))
-		stats.lineChanges = append(stats.lineChanges, float64(repo.TotalLineChanges()))
-		stats.consistency = append(stats.consistency, repo.Consistency(oldestCommit, latestCommit))
+		stats.commits = append(stats.commits, float64(repo.totalCommits()))
+		stats.lineChanges = append(stats.lineChanges, float64(repo.totalLineChanges()))
+		stats.consistency = append(stats.consistency, repo.consistency(oldestCommit, latestCommit))
 	}
 
 	// Normalize metrics to 0-100 scale
-	normalizedStats := stats.Normalize()
+	normalizedStats := stats.normalize()
 
 	// Calculate weighted activity score for each repo
-	var repoScores []RepoScore
+	var repoScores []repoScore
 	for idx, repo := range repos {
 		score := (normalizedStats.commits[idx] * weights.commits) + (normalizedStats.lineChanges[idx] * weights.changes) + (normalizedStats.consistency[idx] * weights.consistency)
-		repoScores = append(repoScores, RepoScore{repo.name, int(math.Round(score))})
+		repoScores = append(repoScores, repoScore{repo.name, int(math.Round(score))})
 	}
 
 	// Sort repos by score in descending order
-	slices.SortFunc(repoScores, func(a, b RepoScore) int {
+	slices.SortFunc(repoScores, func(a, b repoScore) int {
 		scoreCmp := cmp.Compare(a.score, b.score)
 		if scoreCmp == 0 {
 			return cmp.Compare(a.name, b.name)
@@ -384,8 +384,8 @@ func normalizeScore(values []float64) []float64 {
 	return result
 }
 
-func printTop(out io.Writer, scores []RepoScore, top int) error {
-	ew := &ErrWriter{w: out}
+func printTop(out io.Writer, scores []repoScore, top int) error {
+	ew := &errWriter{w: out}
 
 	topx := min(top, len(scores))
 	ew.printf("Top-%d most active repos:\n", topx)
