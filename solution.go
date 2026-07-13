@@ -58,6 +58,10 @@ func (r Repo) TotalLineChanges() int {
 // Uses Coefficient of Variation to measure relative variability.
 // Lower CV = more consistent activity, Higher CV = more sporadic activity.
 func (r Repo) Consistency(startDate time.Time, endDate time.Time) float64 {
+	if startDate.IsZero() || endDate.IsZero() {
+		return 0
+	}
+
 	commitsPerDay := make(map[string]int)
 	for _, commit := range r.commits {
 		day := commit.date.Format("02-01-2006")
