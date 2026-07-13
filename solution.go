@@ -168,6 +168,7 @@ func run(args []string, out io.Writer) error {
 func parseConfig(args []string) (config, error) {
 	// Define CLI flags for parameterization
 	fs := flag.NewFlagSet("repo-activity-score", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 
 	filename := fs.String("f", "", "Path to CSV file (required)")
 	wCommits := fs.Float64("w-commits", 0.33, "Weight for 'total commits' metric (0-1)")
